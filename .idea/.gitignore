@@ -1,0 +1,29 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+# Editor-based HTTP Client requests
+/httpRequests/
+# Datasource local storage ignored files
+/dataSources/
+/dataSources.local.xml
+
+# 忽略 PyCharm 配置
+.idea/
+*.iml
+# 忽略 Python 编译缓存
+__pycache__/
+*.py[cod]
+*.pyo
+# 虚拟环境
+venv/
+env/
+*.egg-info/
+
+# 日志和环境文件
+*.log
+.env
+.env.*
+
+# macOS 文件
+.DS_Store
+
