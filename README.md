@@ -8,6 +8,9 @@
 - 每天自动运行（cron）
 - 回撤 5% 加仓（最多三层）
 ### 2、使用方法
+[注册alpaca交易api账号](https://alpaca.markets/)
+
+[登录Server酱获取微信推送账号](https://sct.ftqq.com/login)
 ```bash
 # 安装依赖
 pip install -r requirements.txt
