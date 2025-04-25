@@ -1,10 +1,23 @@
 import os
 import alpaca_trade_api as tradeapi
+from dotenv import load_dotenv
+
+loaded = load_dotenv()  # 加载.env文件中的变量
+print("dotenv loaded:", loaded)
+key = os.getenv('ALPACA_API_KEY')
+secret = os.getenv('ALPACA_API_SECRET')
+url = os.getenv('ALPACA_API_BASE_URL')
+
+print("KEY:", os.getenv("ALPACA_API_KEY"))
+print("SECRET:", os.getenv("ALPACA_API_SECRET"))
+print("URL:", os.getenv("ALPACA_API_BASE_URL"))
+
+assert key and secret and url
 
 api = tradeapi.REST(
-    os.getenv("APCA_API_KEY_ID"),
-    os.getenv("APCA_API_SECRET_KEY"),
-    base_url="https://paper-api.alpaca.markets"
+    key_id=key,
+    secret_key=secret,
+    base_url=url,
 )
 
 def get_price(symbol):
