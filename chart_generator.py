@@ -331,3 +331,99 @@ class ChartGenerator:
         plt.close()
 
         return filename
+
+    def plot_price_with_ma_crossover(self, symbol, period="6mo", short_period=9, long_period=20):
+        """绘制价格图表，包含移动平均线金叉死叉指标"""
+        # 获取价格数据
+        price_data = self.get_historical_data(symbol, period)
+
+        # 计算短期和长期移动平均线
+        price_data[f'MA{short_period}'] = price_data['Close'].rolling(window=short_period).mean()
+        price_data[f'MA{long_period}'] = price_data['Close'].rolling(window=long_period).mean()
+
+        # 计算金叉死叉信号
+        price_data['Signal'] = 0
+        # 金叉：短期均线从下方穿过长期均线
+        price_data.loc[(price_data[f'MA{short_period}'] > price_data[f'MA{long_period}']) &
+                       (price_data[f'MA{short_period}'].shift(1) <= price_data[f'MA{long_period}'].shift(1)),
+        'Signal'] = 1
+        # 死叉：短期均线从上方穿过长期均线
+        price_data.loc[(price_data[f'MA{short_period}'] < price_data[f'MA{long_period}']) &
+                       (price_data[f'MA{short_period}'].shift(1) >= price_data[f'MA{long_period}'].shift(1)),
+        'Signal'] = -1
+
+        # 创建图表
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), gridspec_kw={'height_ratios': [3, 1]})
+
+        # 绘制价格图
+        ax1.plot(price_data.index, price_data['Close'], 'b-', label=f'{symbol} Price')
+        ax1.set_title(f'{symbol} Price Chart with MA Crossover ({short_period}/{long_period})')
+        ax1.set_ylabel('Price ($)')
+        ax1.grid(True)
+
+        # 添加移动平均线
+        ax1.plot(price_data.index, price_data[f'MA{short_period}'], 'r-', label=f'{short_period}-day MA')
+        ax1.plot(price_data.index, price_data[f'MA{long_period}'], 'g-', label=f'{long_period}-day MA')
+
+        # 标记金叉位置
+        golden_cross = price_data[price_data['Signal'] == 1]
+        ax1.scatter(golden_cross.index, golden_cross['Close'], marker='^', color='gold', s=100, label='Golden Cross',
+                    zorder=5)
+
+        # 标记死叉位置
+        death_cross = price_data[price_data['Signal'] == -1]
+        ax1.scatter(death_cross.index, death_cross['Close'], marker='v', color='black', s=100, label='Death Cross',
+                    zorder=5)
+
+        ax1.legend(loc='upper left')
+
+        # 计算恐慌贪婪指数并在第二个子图表示
+        dates = []
+        values = []
+
+        # 添加恐慌贪婪指数历史模拟
+        for i in range(len(price_data) - 20):
+            date = price_data.index[i + 20]
+            price_change = (price_data['Close'][i + 20] - price_data['Close'][i]) / price_data['Close'][i]
+            volatility = price_data['Close'][i:i + 20].pct_change().std() * np.sqrt(20)
+
+            # 简化模型
+            simulated_fg = 50 + (price_change * 200) - (volatility * 200)
+            simulated_fg = max(0, min(100, simulated_fg))
+
+            dates.append(date)
+            values.append(simulated_fg)
+
+        # 获取当前恐慌贪婪指数
+        current_fg, _ = self.fear_greed_index.get_fear_greed_index()
+        if current_fg:
+            dates.append(price_data.index[-1])
+            values.append(current_fg)
+
+        # 绘制恐慌贪婪指数
+        scatter = ax2.scatter(dates, values, c=values, cmap='RdYlGn', vmin=0, vmax=100, s=30)
+        ax2.set_ylabel('Fear & Greed Index')
+        ax2.set_ylim(0, 100)
+        ax2.grid(True)
+        ax2.axhline(y=25, color='r', linestyle='--', alpha=0.5)  # 极度恐慌线
+        ax2.axhline(y=75, color='g', linestyle='--', alpha=0.5)  # 极度贪婪线
+
+        # 添加颜色条
+        cbar = fig.colorbar(scatter, ax=ax2)
+        cbar.set_label('Fear & Greed Index')
+
+        # 设置日期格式
+        for ax in [ax1, ax2]:
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+            ax.xaxis.set_major_locator(mdates.MonthLocator())
+            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
+
+        plt.tight_layout()
+
+        # 保存图表
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{self.output_dir}/{symbol}_ma_crossover_{short_period}_{long_period}_{timestamp}.png"
+        plt.savefig(filename)
+        plt.close()
+
+        return filename

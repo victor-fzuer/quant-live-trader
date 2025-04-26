@@ -68,6 +68,11 @@ def main():
             if price_chart:
                 notify(f"已生成{symbol}价格和恐慌贪婪指数图表: {price_chart}")
 
+            # 添加金叉死叉图表
+            ma_chart = chart_generator.plot_price_with_ma_crossover(symbol)
+            if ma_chart:
+                notify(f"已生成{symbol}金叉死叉图表: {ma_chart}")
+
         # 生成多股票比较图表
         multi_chart = chart_generator.plot_multiple_stocks(TARGETS)
         if multi_chart:
@@ -97,6 +102,11 @@ def main():
                             price_chart = chart_generator.plot_price_with_fear_greed(symbol)
                             if price_chart:
                                 notify(f"已生成{symbol}每日价格图表: {price_chart}")
+
+                            # 添加金叉死叉图表
+                            ma_chart = chart_generator.plot_price_with_ma_crossover(symbol)
+                            if ma_chart:
+                                notify(f"已生成{symbol}每日金叉死叉图表: {ma_chart}")
 
                         # 生成多股票比较图表
                         multi_chart = chart_generator.plot_multiple_stocks(TARGETS)

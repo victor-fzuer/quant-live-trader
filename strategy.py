@@ -7,6 +7,7 @@ import time
 import datetime
 import pytz
 import numpy as np
+import yfinance as yf
 
 # 初始化风险管理器和市场监控器
 risk_manager = RiskManager()
@@ -71,6 +72,46 @@ def calculate_atr(symbol, period=14):
     volatility = price * volatility_estimates.get(symbol, 0.02)
     return volatility
 
+def calculate_ma_crossover(symbol, short_period=9, long_period=20):
+    """
+    计算移动平均线金叉死叉信号
+
+    返回:
+    1: 金叉信号（买入）
+    -1: 死叉信号（卖出）
+    0: 无信号
+    """
+    try:
+        # 获取历史数据
+        ticker = yf.Ticker(symbol)
+        data = ticker.history(period="3mo")
+
+        if len(data) < max(short_period, long_period) + 2:
+            return 0  # 数据不足以计算
+
+        # 计算移动平均线
+        data[f'MA{short_period}'] = data['Close'].rolling(window=short_period).mean()
+        data[f'MA{long_period}'] = data['Close'].rolling(window=long_period).mean()
+
+        # 获取最新的和前一天的均线数据
+        current_short_ma = data[f'MA{short_period}'].iloc[-1]
+        current_long_ma = data[f'MA{long_period}'].iloc[-1]
+        prev_short_ma = data[f'MA{short_period}'].iloc[-2]
+        prev_long_ma = data[f'MA{long_period}'].iloc[-2]
+
+        # 判断金叉
+        if prev_short_ma <= prev_long_ma and current_short_ma > current_long_ma:
+            return 1
+
+        # 判断死叉
+        if prev_short_ma >= prev_long_ma and current_short_ma < current_long_ma:
+            return -1
+
+        return 0
+    except Exception as e:
+        print(f"计算均线交叉出错: {e}")
+        return 0
+
 
 def process_symbol(symbol):
     # 获取当前价格和持仓
@@ -79,6 +120,10 @@ def process_symbol(symbol):
 
     # 获取恐慌贪婪指数信号
     fg_signal, fg_value = market_monitor.get_fear_greed_signal()
+
+    # 获取移动平均线交叉信号 (9日/20日)
+    ma_signal = calculate_ma_crossover(symbol)
+
     state = states[symbol]
 
     # 返回结果
@@ -90,8 +135,33 @@ def process_symbol(symbol):
             notify(f"已达到每日亏损限制，暂停交易")
             return None
 
-        # 根据恐慌贪婪指数决定是否买入
-        if USE_FEAR_GREED_INDEX and fg_signal in ["BUY", "STRONG_BUY"]:
+        # 金叉信号增强买入条件
+        if ma_signal == 1:
+            notify(f"{symbol} 检测到金叉信号，考虑买入")
+
+            # 恐慌贪婪指数与金叉信号结合
+            if USE_FEAR_GREED_INDEX and fg_signal in ["BUY", "STRONG_BUY"]:
+                # 恐慌区域+金叉，强买入信号
+                buy_size = LAYER_SIZE * 1.2  # 增加买入比例
+                if fg_signal == "STRONG_BUY":
+                    buy_size *= EXTREME_FEAR_BOOST
+                    notify(f"检测到极度恐慌指数: {fg_value}与金叉共振，大幅增加{symbol}买入仓位")
+
+                result = buy_with_percent_cash(symbol, buy_size)
+                if result:
+                    state["layers"] = 1
+                    state["entry_price"] = price
+                    notify(f"金叉+恐慌指数触发买入 {symbol} {result['qty']} 股，价格 {price:.2f}，恐慌指数: {fg_value}")
+            else:
+                # 仅金叉信号也买入，但比例较小
+                result = buy_with_percent_cash(symbol, LAYER_SIZE)
+                if result:
+                    state["layers"] = 1
+                    state["entry_price"] = price
+                    notify(f"金叉信号触发买入 {symbol} {result['qty']} 股，价格 {price:.2f}")
+
+        # 原有买入逻辑，但优先级较低
+        elif USE_FEAR_GREED_INDEX and fg_signal in ["BUY", "STRONG_BUY"]:
             # 恐慌区域，是买入信号
             buy_size = LAYER_SIZE
             if fg_signal == "STRONG_BUY":
@@ -104,8 +174,8 @@ def process_symbol(symbol):
                 state["entry_price"] = price
                 notify(f"恐慌指数触发买入 {symbol} {result['qty']} 股，价格 {price:.2f}，恐慌指数: {fg_value}")
         else:
-            # 常规策略买入
-            result = buy_with_percent_cash(symbol, LAYER_SIZE)
+            # 常规策略买入（优先级最低）
+            result = buy_with_percent_cash(symbol, LAYER_SIZE * 0.8)  # 降低常规买入比例
             if result:
                 state["layers"] = 1
                 state["entry_price"] = price
@@ -114,7 +184,26 @@ def process_symbol(symbol):
         # 已持仓，判断止盈止损
         change = (price - entry) / entry
 
-        # 恐慌贪婪指数强卖信号检查
+        # 死叉信号增强卖出条件
+        if ma_signal == -1:
+            notify(f"{symbol} 检测到死叉信号，考虑卖出")
+
+            # 如果已经有盈利或在贪婪区域，死叉信号触发卖出
+            if change > 0 or (USE_FEAR_GREED_INDEX and fg_signal in ["SELL", "STRONG_SELL"]):
+                sell(symbol, qty)
+                risk_manager.update_position(symbol, 0, -qty)
+                notify(f"死叉信号触发卖出 {symbol} 全部 {qty} 股，价格 {price:.2f}" +
+                       (f"，贪婪指数: {fg_value}" if USE_FEAR_GREED_INDEX and fg_signal in ["SELL",
+                                                                                           "STRONG_SELL"] else ""))
+                state["layers"] = 0
+                return {
+                    "action": "sell",
+                    "symbol": symbol,
+                    "qty": qty,
+                    "price": price
+                }
+
+        # 原有的恐慌贪婪指数卖出逻辑
         if USE_FEAR_GREED_INDEX and fg_signal in ["SELL", "STRONG_SELL"]:
             # 在贪婪区域，是卖出信号
             if fg_signal == "STRONG_SELL" or change > 0:  # 极度贪婪或已有盈利
@@ -205,9 +294,15 @@ def process_symbol(symbol):
                     notify(f"{symbol} 当前亏损已超过安全线，暂不加仓")
                     return None
 
+                # 金叉信号增强加仓逻辑
+                add_amount_multiplier = 1.0
+                if ma_signal == 1:
+                    add_amount_multiplier = 1.3  # 有金叉时增加加仓力度
+                    notify(f"{symbol} 检测到金叉信号，增强加仓力度")
+
                 # 检查恐慌贪婪指数
                 if USE_FEAR_GREED_INDEX:
-                    buy_size = LAYER_SIZE
+                    buy_size = LAYER_SIZE * add_amount_multiplier
 
                     # 在恐慌区域加大仓位
                     if fg_signal == "STRONG_BUY":
@@ -224,7 +319,7 @@ def process_symbol(symbol):
 
                     result = buy_with_percent_cash(symbol, buy_size)
                 else:
-                    result = buy_with_percent_cash(symbol, LAYER_SIZE)
+                    result = buy_with_percent_cash(symbol, LAYER_SIZE * add_amount_multiplier)
 
                 if result:
                     risk_manager.update_position(symbol, price, result["qty"])
