@@ -2,3 +2,8 @@ alpaca-trade-api
 requests
 python-dotenv
 pytz
+yfinance
+numpy
+beautifulsoup4
+matplotlib
+pandas
